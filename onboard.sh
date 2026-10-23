@@ -7,8 +7,10 @@ set -euo pipefail
 readonly PINNED_VERSION="3.1.0"
 readonly SERVER_URL="${AI_MEMORY_SERVER_URL:-https://memory.twobrainstechnology.com}"
 readonly INSTALLER_URL="${AI_MEMORY_INSTALLER_URL:-https://github.com/akitaonrails/ai-memory/releases/download/v${PINNED_VERSION}/install.sh}"
+readonly SKILLS_URL="${AI_MEMORY_SKILLS_URL:-https://raw.githubusercontent.com/twobrains-technology/ai-memory-onboarding/main/skills}"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+warn() { printf 'warning: %s\n' "$1" >&2; }
 info() { printf '==> %s\n' "$1"; }
 
 # Reads from the terminal device, not stdin: in `curl ... | bash` stdin is the script itself.
@@ -71,6 +73,26 @@ wire_agents() {
   fi
 }
 
+# Claude Code reads the first root; Codex and Pi share the second. A failed download only
+# warns: the binary and hooks are already in place, and a re-run installs the skill.
+install_skills() {
+  local name="twobrains-onboard-repo" url tmp root
+  url="$SKILLS_URL/$name/SKILL.md"
+  tmp="$(mktemp)"
+  if ! curl -fsSL "$url" -o "$tmp" || [[ ! -s "$tmp" ]]; then
+    rm -f "$tmp"
+    warn "could not download the $name skill from $url; re-run this script to install it"
+    return 0
+  fi
+  info "installing the $name skill for Claude Code, Codex and Pi"
+  for root in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" "$HOME/.agents/skills"; do
+    if ! { mkdir -p "$root/$name" && cp "$tmp" "$root/$name/SKILL.md"; }; then
+      warn "could not write $root/$name/SKILL.md"
+    fi
+  done
+  rm -f "$tmp"
+}
+
 print_next_steps() {
   printf '\nDone. Next steps:\n'
   printf '  - Restart Claude Code and Claude Desktop so they load the ai-memory hooks and MCP server.\n'
@@ -81,6 +103,8 @@ print_next_steps() {
     printf '  - Pi: restart Pi to load the ai-memory extension.\n'
   fi
   cat <<'EOF'
+  - In each TwoBrains repository, ask your agent to onboard it, for example "configura esse repo na memória do time".
+    That runs the twobrains-onboard-repo skill: it writes .ai-memory.toml (commit it) and records related systems.
   - Only repositories with a committed .ai-memory.toml are captured. Check one from its root with:
       printf '{"cwd":"%s"}' "$PWD" | ai-memory hook --event user-prompt-submit --agent claude-code --check-capture
 EOF
@@ -93,6 +117,7 @@ main() {
   check_identity "$key"
   ensure_binary
   wire_agents "$key"
+  install_skills
   print_next_steps
 }
 

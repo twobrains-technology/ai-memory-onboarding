@@ -23,6 +23,22 @@ function Get-InstallerUrl {
     return "https://github.com/akitaonrails/ai-memory/releases/download/v$($script:PinnedVersion)/install.ps1"
 }
 
+function Get-SkillsUrl {
+    if ($env:AI_MEMORY_SKILLS_URL) { return $env:AI_MEMORY_SKILLS_URL }
+    return 'https://raw.githubusercontent.com/twobrains-technology/ai-memory-onboarding/main/skills'
+}
+
+# USERPROFILE, where the agents look. Not $HOME: Windows PowerShell 5.1 builds it from
+# HOMEDRIVE and HOMEPATH, which point elsewhere on machines with a redirected home folder.
+function Get-UserHome {
+    return [Environment]::GetFolderPath('UserProfile')
+}
+
+function Invoke-SkillDownload {
+    param([Parameter(Mandatory)][string]$Url, [Parameter(Mandatory)][string]$OutFile)
+    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+}
+
 function Read-AimKey {
     $key = $env:AI_MEMORY_AUTH_TOKEN
     if (-not $key) {
@@ -75,6 +91,29 @@ function Invoke-AiMemory {
     }
 }
 
+# Claude Code reads the first root; Codex and Pi share the second. A failed download only
+# warns: the binary and hooks are already in place, and a re-run installs the skill.
+function Install-AgentSkill {
+    $name = 'twobrains-onboard-repo'
+    $url = "$(Get-SkillsUrl)/$name/SKILL.md"
+    $claudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path (Get-UserHome) '.claude' }
+    $tmp = [System.IO.Path]::GetTempFileName()
+    try {
+        Invoke-SkillDownload -Url $url -OutFile $tmp
+        if ((Get-Item -LiteralPath $tmp).Length -eq 0) { throw 'the download was empty' }
+        Write-Host "==> installing the $name skill for Claude Code, Codex and Pi"
+        foreach ($root in @((Join-Path $claudeDir 'skills'), (Join-Path (Get-UserHome) '.agents/skills'))) {
+            $dir = Join-Path $root $name
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Copy-Item -LiteralPath $tmp -Destination (Join-Path $dir 'SKILL.md') -Force
+        }
+    } catch {
+        Write-Warning "Could not install the $name skill from $url ($($_.Exception.Message)). Re-run this script to install it."
+    } finally {
+        Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-Onboarding {
     $key = Read-AimKey
     Test-ServerIdentity -Key $key
@@ -96,14 +135,19 @@ function Invoke-Onboarding {
     Write-Host '==> wiring Claude Code (CLI and Claude Desktop Code tab)'
     Invoke-AiMemory -Arguments @('install-mcp', '--client', 'claude-code', '--apply')
     Invoke-AiMemory -Arguments @('install-hooks', '--agent', 'claude-code', '--capture-mode', 'allowlist', '--apply')
+    Install-AgentSkill
 
-    Write-Host @'
+    # A char code keeps this file ASCII: Windows PowerShell 5.1 reads a script without a BOM as ANSI.
+    $example = "configura esse repo na mem$([char]0x00F3)ria do time"
+    Write-Host @"
 
 Done. Next steps:
   - Restart Claude Code and Claude Desktop so they load the ai-memory hooks and MCP server.
+  - In each TwoBrains repository, ask your agent to onboard it, for example "$example".
+    That runs the twobrains-onboard-repo skill: it writes .ai-memory.toml (commit it) and records related systems.
   - Only repositories with a committed .ai-memory.toml are captured. Check one from its root with:
-      @{ cwd = $PWD.Path } | ConvertTo-Json -Compress | ai-memory hook --event user-prompt-submit --agent claude-code --check-capture
-'@
+      @{ cwd = `$PWD.Path } | ConvertTo-Json -Compress | ai-memory hook --event user-prompt-submit --agent claude-code --check-capture
+"@
 }
 
 if ($MyInvocation.InvocationName -ne '.') { Invoke-Onboarding }
