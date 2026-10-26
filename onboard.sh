@@ -5,6 +5,8 @@
 set -euo pipefail
 
 readonly PINNED_VERSION="3.1.0"
+# The team server's MCP name: "ai-memory" stays free for a developer's own memory server.
+readonly MCP_NAME="cortex-memory"
 readonly SERVER_URL="${AI_MEMORY_SERVER_URL:-https://memory.twobrainstechnology.com}"
 readonly INSTALLER_URL="${AI_MEMORY_INSTALLER_URL:-https://github.com/akitaonrails/ai-memory/releases/download/v${PINNED_VERSION}/install.sh}"
 readonly SKILLS_URL="${AI_MEMORY_SKILLS_URL:-https://raw.githubusercontent.com/twobrains-technology/ai-memory-onboarding/main/skills}"
@@ -58,11 +60,11 @@ ensure_binary() {
 wire_agents() {
   export AI_MEMORY_SERVER_URL="$SERVER_URL" AI_MEMORY_AUTH_TOKEN="$1"
   info "wiring Claude Code (CLI and Claude Desktop Code tab)"
-  ai-memory install-mcp --client claude-code --apply
+  ai-memory install-mcp --client claude-code --name "$MCP_NAME" --apply
   ai-memory install-hooks --agent claude-code --capture-mode allowlist --apply
   if command -v codex >/dev/null 2>&1; then
     info "wiring Codex"
-    ai-memory install-mcp --client codex --apply
+    ai-memory install-mcp --client codex --name "$MCP_NAME" --apply
     ai-memory install-hooks --agent codex --capture-mode allowlist --apply
     WIRED_CODEX=1
   fi
@@ -75,6 +77,17 @@ wire_agents() {
 
 # Claude Code reads the first root; Codex and Pi share the second. A failed download only
 # warns: the binary and hooks are already in place, and a re-run installs the skill.
+# The automatic history import uploads, unreviewed, the local sessions of whoever opens the first
+# session while a project is empty, and nobody else's. Off: each developer brings history on purpose
+# with the twobrains-onboard-repo skill. ai-memory reads this from the machine config, not the marker.
+disable_auto_backfill() {
+  local dir="${AI_MEMORY_DATA_DIR:-$HOME/Library/Application Support/ai-memory}" rest=""
+  mkdir -p "$dir"
+  [[ -f "$dir/config.toml" ]] && rest="$(grep -v '^backfill_on_start' "$dir/config.toml" || true)"
+  { echo "backfill_on_start = false"; [[ -n "$rest" ]] && printf '%s\n' "$rest"; } > "$dir/config.toml"
+  info "automatic history import turned off (bring history with the twobrains-onboard-repo skill)"
+}
+
 install_skills() {
   local name="twobrains-onboard-repo" url tmp root
   url="$SKILLS_URL/$name/SKILL.md"
@@ -117,6 +130,7 @@ main() {
   check_identity "$key"
   ensure_binary
   wire_agents "$key"
+  disable_auto_backfill
   install_skills
   print_next_steps
 }

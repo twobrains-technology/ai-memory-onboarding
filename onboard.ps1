@@ -12,6 +12,8 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $script:PinnedVersion = '3.1.0'
+# The team server's MCP name: "ai-memory" stays free for a developer's own memory server.
+$script:McpName = 'cortex-memory'
 
 function Get-ServerUrl {
     if ($env:AI_MEMORY_SERVER_URL) { return $env:AI_MEMORY_SERVER_URL }
@@ -114,6 +116,27 @@ function Install-AgentSkill {
     }
 }
 
+# The automatic history import uploads, unreviewed, the local sessions of whoever opens the first
+# session while a project is empty, and nobody else's. Off: each developer brings history on purpose
+# with the twobrains-onboard-repo skill. ai-memory reads this from the machine config, not the marker.
+function Get-AiMemoryDataDir {
+    if ($env:AI_MEMORY_DATA_DIR) { return $env:AI_MEMORY_DATA_DIR }
+    return Join-Path $env:LOCALAPPDATA 'ai-memory'
+}
+
+function Disable-AutoBackfill {
+    $dir = Get-AiMemoryDataDir
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $cfg = Join-Path $dir 'config.toml'
+    $rest = @()
+    if (Test-Path -LiteralPath $cfg) {
+        $rest = @(Get-Content -LiteralPath $cfg | Where-Object { $_ -notmatch '^backfill_on_start' })
+    }
+    # File.WriteAllLines writes UTF-8 without a BOM, which the TOML parser needs.
+    [System.IO.File]::WriteAllLines($cfg, [string[]](@('backfill_on_start = false') + $rest))
+    Write-Host '==> automatic history import turned off (bring history with the twobrains-onboard-repo skill)'
+}
+
 function Invoke-Onboarding {
     $key = Read-AimKey
     Test-ServerIdentity -Key $key
@@ -133,8 +156,9 @@ function Invoke-Onboarding {
     $env:AI_MEMORY_SERVER_URL = Get-ServerUrl
     $env:AI_MEMORY_AUTH_TOKEN = $key
     Write-Host '==> wiring Claude Code (CLI and Claude Desktop Code tab)'
-    Invoke-AiMemory -Arguments @('install-mcp', '--client', 'claude-code', '--apply')
+    Invoke-AiMemory -Arguments @('install-mcp', '--client', 'claude-code', '--name', $script:McpName, '--apply')
     Invoke-AiMemory -Arguments @('install-hooks', '--agent', 'claude-code', '--capture-mode', 'allowlist', '--apply')
+    Disable-AutoBackfill
     Install-AgentSkill
 
     # A char code keeps this file ASCII: Windows PowerShell 5.1 reads a script without a BOM as ANSI.

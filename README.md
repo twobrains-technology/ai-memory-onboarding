@@ -31,8 +31,11 @@ Paste your key when asked, then restart Claude Code, Claude Desktop, Codex and P
 1. Checks your key with the server before changing anything.
 2. Installs the pinned `ai-memory` binary (official release, checksum verified).
 3. Connects your agents (Claude Code, plus Codex and Pi on macOS) in **allowlist** mode: only
-   repositories with a `.ai-memory.toml` file are captured.
-4. Installs the `twobrains-onboard-repo` skill for Claude Code (`~/.claude/skills`) and for Codex
+   repositories with a `.ai-memory.toml` file are captured. The team server shows up in your agent
+   as the MCP server `cortex-memory`.
+4. Turns off ai-memory's automatic history import on this machine, so none of your old sessions
+   reach the team unreviewed. You bring them yourself in step 2.
+5. Installs the `twobrains-onboard-repo` skill for Claude Code (`~/.claude/skills`) and for Codex
    and Pi (`~/.agents/skills`).
 
 ## 2. Onboard each repository
@@ -50,7 +53,10 @@ The `twobrains-onboard-repo` skill takes it from there. It asks one question at 
    and the code.
 4. It shows you a short **Related systems** table. Once you approve it, it saves the table on the
    server as a pinned page of this project, so every later session starts with it.
-5. It checks that capture works.
+5. It offers to bring your earlier sessions in this repository, worktrees included. It keeps only
+   decisions, pitfalls and procedures, leaves out anything personal, skips what the team already
+   has, and shows you every page. Nothing is saved until you approve it.
+6. It checks that capture works.
 
 Then commit `.ai-memory.toml` so your teammates are captured too. The skill never commits, and it
 never edits `CLAUDE.md` or `AGENTS.md`: relations live on the server, not in the repository.
